@@ -410,6 +410,7 @@ nav {
 // ── State ──────────────────────────────────────────────────────────────────
 let API_KEY = localStorage.getItem('mpa') || '';
 const OMDB_KEY = 'e1292d16';
+const TMDB_KEY = '4d93a504585f4aa91c27003d825c9dc1';
 const A = {};
 let lastMovies = {};
 let favouredMovie = null;
@@ -571,7 +572,17 @@ function genPoster(title, genre) {
 
 // ── Render ─────────────────────────────────────────────────────────────────
 async function fetchPoster(title, year) {
-  // 1. iTunes — CORS-friendly, no key
+  // TMDB — hosts its own images, fully CORS-friendly
+  if (TMDB_KEY) {
+    try {
+      const res = await fetch('https://api.themoviedb.org/3/search/movie?api_key='+TMDB_KEY+'&query='+encodeURIComponent(title)+'&year='+year+'&include_adult=false');
+      const data = await res.json();
+      if (data.results && data.results.length && data.results[0].poster_path) {
+        return 'https://image.tmdb.org/t/p/w500' + data.results[0].poster_path;
+      }
+    } catch(e) { console.log('TMDB failed:', e); }
+  }
+  // iTunes fallback — CORS-friendly, no key
   try {
     const res = await fetch('https://itunes.apple.com/search?term='+encodeURIComponent(title)+'&entity=movie&limit=8&media=movie');
     const data = await res.json();
@@ -580,13 +591,6 @@ async function fetchPoster(title, year) {
       if (match && match.artworkUrl100) return match.artworkUrl100.replace('100x100bb','600x900bb');
     }
   } catch(e) { console.log('iTunes failed:', e); }
-  // 2. OMDb direct (works when hosted, key activated)
-  try {
-    const res = await fetch('https://www.omdbapi.com/?apikey='+OMDB_KEY+'&t='+encodeURIComponent(title)+'&y='+year+'&type=movie');
-    const data = await res.json();
-    console.log('OMDb response for', title, ':', data.Poster);
-    if (data.Poster && data.Poster !== 'N/A') return data.Poster;
-  } catch(e) { console.log('OMDb failed:', e); }
   return null;
 }
 
@@ -639,38 +643,16 @@ async function renderResults(json, label) {
   show('s-results');
 
   async function swapPoster(id, m) {
-    const rawUrl = await fetchPoster(m.title, m.year);
-    if (!rawUrl) return;
+    const imgUrl = await fetchPoster(m.title, m.year);
+    if (!imgUrl) return;
     const posterDiv = document.getElementById('poster-'+id);
-    const pg = document.getElementById('pg-'+id);
-    if (!posterDiv || !pg) return;
-
-    // Try three proxies in sequence until one loads
-    const proxies = [
-      'https://corsproxy.io/?' + encodeURIComponent(rawUrl),
-      'https://api.allorigins.win/raw?url=' + encodeURIComponent(rawUrl),
-      rawUrl
-    ];
-
-    for (const src of proxies) {
-      const loaded = await new Promise(resolve => {
-        const img = new Image();
-        img.crossOrigin = 'anonymous';
-        img.onload = () => resolve(img);
-        img.onerror = () => resolve(null);
-        setTimeout(() => resolve(null), 4000);
-        img.src = src;
-      });
-      if (loaded) {
-        const el = document.createElement('img');
-        el.src = src;
-        el.crossOrigin = 'anonymous';
-        el.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;opacity:0;transition:opacity 0.5s ease;border-radius:1rem 1rem 0 0;';
-        el.onload = () => { el.style.opacity = '1'; };
-        posterDiv.insertBefore(el, posterDiv.firstChild);
-        return;
-      }
-    }
+    if (!posterDiv) return;
+    const el = document.createElement('img');
+    el.src = imgUrl;
+    el.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center top;opacity:0;transition:opacity 0.5s ease;border-radius:1rem 1rem 0 0;';
+    el.onload = () => { el.style.opacity = '1'; };
+    el.onerror = () => { el.remove(); };
+    posterDiv.insertBefore(el, posterDiv.firstChild);
   }
 
   swapPoster('c1', json.movie1);
